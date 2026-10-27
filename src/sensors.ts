@@ -27,6 +27,8 @@ export class SpeedFilter {
   source: Telemetry["source"] = "none";
   lastGood = -Infinity;
   private previous?: { coords: GeolocationCoordinates; now: number };
+  private positionWindow: { coords: GeolocationCoordinates; now: number }[] =
+    [];
   update(coords: GeolocationCoordinates, now: number): boolean {
     if (
       !Number.isFinite(coords.accuracy) ||
@@ -36,29 +38,39 @@ export class SpeedFilter {
       !Number.isFinite(coords.longitude)
     )
       return false;
+    if (this.previous && now <= this.previous.now) return false;
     let next = coords.speed;
     let source: Telemetry["source"] = "gps";
     if (next === null || !Number.isFinite(next) || next < 0) {
       source = "position";
       if (!this.previous) {
         this.previous = { coords, now };
+        this.positionWindow = [{ coords, now }];
         return false;
       }
-      const seconds = (now - this.previous.now) / 1000;
-      if (seconds < 1) return false;
       if (
-        seconds > 5 ||
+        now - this.previous.now > 5000 ||
         coords.accuracy > 25 ||
         this.previous.coords.accuracy > 25
       ) {
         this.previous = { coords, now };
+        this.positionWindow = [{ coords, now }];
         return false;
       }
-      const moved = distance(this.previous.coords, coords);
-      const uncertainty =
-        (coords.accuracy + this.previous.coords.accuracy) * 0.5;
+      // Accumulate displacement across fixes so slow travel is not discarded
+      // every second as noise. Limit the window to bound stopping latency.
+      this.positionWindow.push({ coords, now });
+      this.positionWindow = this.positionWindow.filter(
+        (p) => now - p.now <= 5000,
+      );
+      const anchor = this.positionWindow[0];
+      this.previous = { coords, now };
+      const seconds = (now - anchor.now) / 1000;
+      if (seconds < 1) return false;
+      const moved = distance(anchor.coords, coords);
+      const uncertainty = (coords.accuracy + anchor.coords.accuracy) * 0.5;
       next = moved < uncertainty ? 0 : moved / seconds;
-    }
+    } else this.positionWindow = [{ coords, now }];
     const dt = (now - this.lastGood) / 1000;
     if (dt <= 0) return false;
     this.previous = { coords, now };
@@ -70,7 +82,7 @@ export class SpeedFilter {
     if (next < 0.3) next = 0;
     const old = this.speed;
     this.speed =
-      old === null || dt >= 3
+      next === 0 || old === null || dt >= 3
         ? next
         : old + (next - old) * (1 - Math.exp(-dt / 0.35));
     this.acceleration =
@@ -91,8 +103,53 @@ export class SpeedFilter {
   }
 }
 
+/** Short motion predictions, repeatedly pulled back to the GPS reference. */
+export class SpeedFusion {
+  private speed: number | null = null;
+  private gpsSpeed = 0;
+  private lastFix = -Infinity;
+  private lastMotion = -Infinity;
+  correct(speed: number, now: number) {
+    this.speed =
+      this.speed === null || now - this.lastFix > 3000 || speed === 0
+        ? speed
+        : this.speed + (speed - this.speed) * 0.65;
+    this.gpsSpeed = speed;
+    this.speed = clamp(this.speed, Math.max(0, speed - 2), speed + 2);
+    this.lastFix = now;
+    this.lastMotion = now;
+  }
+  advance(acceleration: number, now: number) {
+    const dt = (now - this.lastMotion) / 1000;
+    if (dt <= 0) return;
+    this.lastMotion = now;
+    if (this.speed === null || now - this.lastFix > 3000) return;
+    if (dt > 0.25) {
+      // Do not integrate across missing events or a main-thread stall.
+      this.speed = this.gpsSpeed;
+      return;
+    }
+    const a = Math.abs(acceleration) < 0.08 ? 0 : acceleration;
+    this.speed = clamp(
+      this.speed + a * dt,
+      Math.max(0, this.gpsSpeed - 2),
+      this.gpsSpeed + 2,
+    );
+  }
+  read(now: number) {
+    return now - this.lastFix <= 3000 && now - this.lastMotion < 500
+      ? this.speed
+      : null;
+  }
+  reset() {
+    this.speed = null;
+    this.lastMotion = -Infinity;
+  }
+}
+
 export class SensorService {
   private filter = new SpeedFilter();
+  private fusion = new SpeedFusion();
   private watch?: number;
   private calibration: Telemetry["calibration"] = "off";
   private message = "Waiting for a GPS fix. Head outside for a clear signal.";
@@ -119,8 +176,11 @@ export class SensorService {
     this.watch = navigator.geolocation.watchPosition(
       (position) => {
         if (this.disposed || Date.now() - position.timestamp > 10000) return;
-        if (this.filter.update(position.coords, performance.now()))
+        const now = performance.now();
+        if (this.filter.update(position.coords, now)) {
+          this.fusion.correct(this.filter.speed!, now);
           this.message = "";
+        }
       },
       (error) => {
         if (this.disposed) return;
@@ -143,6 +203,9 @@ export class SensorService {
     this.baseline = [];
     this.learning = [];
     this.forward = null;
+    this.motionAcceleration = 0;
+    this.lastMotion = -Infinity;
+    this.fusion.reset();
   }
   private onMotion = (event: DeviceMotionEvent) => {
     const now = performance.now();
@@ -154,7 +217,6 @@ export class SensorService {
       event.rotationRate?.beta ?? 0,
       event.rotationRate?.gamma ?? 0,
     );
-    this.lastMotion = now;
     if (this.calibration === "stationary") {
       if ((this.filter.speed ?? 0) > 0.5 || gyro > 8 || (a && norm(a) > 0.4)) {
         this.baseline = [];
@@ -188,10 +250,14 @@ export class SensorService {
     ) {
       this.calibration = "moved";
       this.forward = null;
+      this.fusion.reset();
+      this.motionAcceleration = 0;
       return;
     }
     if (gyro > 20) {
-      this.motionAcceleration *= 0.8;
+      this.motionAcceleration = 0;
+      this.lastMotion = -Infinity;
+      this.fusion.reset();
       return;
     } // Turning must not create throttle spikes.
     const gravityUnit = this.gravity.map(
@@ -222,15 +288,24 @@ export class SensorService {
     }
     if (this.forward) {
       const value = dot(horizontal, this.forward);
-      if (Math.abs(value) < 5)
+      if (Math.abs(value) < 5) {
         this.motionAcceleration += (value - this.motionAcceleration) * 0.12;
+        this.lastMotion = now;
+        this.fusion.advance(this.motionAcceleration, now);
+      } else {
+        this.motionAcceleration = 0;
+        this.lastMotion = -Infinity;
+        this.fusion.reset();
+      }
     }
   };
   read(now: number): Telemetry {
     const fresh = this.filter.fresh(now);
     const motion = this.calibration === "ready" && now - this.lastMotion < 500;
     return {
-      speed: fresh ? this.filter.speed : null,
+      speed: fresh
+        ? ((motion ? this.fusion.read(now) : null) ?? this.filter.speed)
+        : null,
       acceleration: fresh
         ? motion
           ? 0.75 * this.motionAcceleration + 0.25 * this.filter.acceleration

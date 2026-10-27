@@ -178,6 +178,17 @@ test("live mode consumes GPS updates and releases tracking on stop", async ({
   page,
 }) => {
   await page.addInitScript(() => {
+    const sources: AudioBufferSourceNode[] = [];
+    const createSource = AudioContext.prototype.createBufferSource;
+    AudioContext.prototype.createBufferSource = function () {
+      const source = createSource.call(this);
+      sources.push(source);
+      return source;
+    };
+    (window as unknown as Record<string, unknown>).loopRates = () =>
+      sources
+        .filter((s) => s.loop && s.buffer!.duration > 3)
+        .map((s) => s.playbackRate.value);
     let success: PositionCallback;
     Object.defineProperty(navigator, "geolocation", {
       value: {
@@ -209,6 +220,27 @@ test("live mode consumes GPS updates and releases tracking on stop", async ({
   await page.goto("/");
   await page.getByRole("button", { name: "Start engine" }).click();
   await expect(page.getByRole("button", { name: "Stop engine" })).toBeVisible();
+  const rates = () =>
+    page.evaluate(() =>
+      (window as unknown as { loopRates: () => number[] }).loopRates(),
+    );
+  await page.evaluate(() =>
+    (window as unknown as { pushSpeed: (n: number) => void }).pushSpeed(0),
+  );
+  await expect(page.getByLabel("Current speed 0 mph")).toBeVisible();
+  await expect.poll(async () => Math.max(...(await rates()))).toBeLessThan(0.4);
+  const idleRates = await rates();
+  expect(idleRates).toHaveLength(2);
+  // Stay within first gear to verify the actual source rate responds to GPS.
+  await page.waitForTimeout(1000);
+  await page.evaluate(() =>
+    (window as unknown as { pushSpeed: (n: number) => void }).pushSpeed(1),
+  );
+  await expect(page.getByLabel("Current speed 2 mph")).toBeVisible();
+  await expect
+    .poll(async () => Math.min(...(await rates())))
+    .toBeGreaterThan(idleRates[0] * 2);
+  await page.waitForTimeout(1000);
   await page.evaluate(() =>
     (window as unknown as { pushSpeed: (n: number) => void }).pushSpeed(5),
   );
