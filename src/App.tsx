@@ -23,8 +23,6 @@ import {
   ShieldCheck,
   Trash2,
   Upload,
-  Volume2,
-  VolumeX,
   Wrench,
   X,
 } from "lucide-react";
@@ -127,12 +125,11 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [demo, setDemo] = useState(false);
+  const demo = window.location.pathname.replace(/\/+$/, "") === "/demo";
   const [telemetry, setTelemetry] = useState<Telemetry>(idleTelemetry);
   const [frame, setFrame] = useState<EngineFrame>(idleFrame);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
-  const [muted, setMuted] = useState(false);
   const [editing, setEditing] = useState<StoredPack | null>(null);
   const [modal, setModal] = useState<
     "install" | "calibrate" | "credits" | "delete" | null
@@ -161,8 +158,6 @@ export default function App() {
   const defaultCache = useRef<Promise<StoredPack> | null>(null);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
-  const mutedRef = useRef(muted);
-  mutedRef.current = muted;
   const demoValues = useRef({ speed: demoSpeed, throttle: demoThrottle });
   demoValues.current = { speed: demoSpeed, throttle: demoThrottle };
   const generation = useRef(0);
@@ -228,9 +223,6 @@ export default function App() {
       ),
     );
   }, [settings.topSpeedMps, settings.unit]);
-  useEffect(() => {
-    audioRef.current?.setVolume(muted ? 0 : 1);
-  }, [muted]);
   useEffect(() => {
     if (!toast) return;
     const timeout = window.setTimeout(() => setToast(""), 5000);
@@ -364,7 +356,7 @@ export default function App() {
         if (state === "interrupted" || state === "suspended") stop(true);
       });
     }
-    audioRef.current.setVolume(mutedRef.current ? 0 : 1);
+    audioRef.current.setVolume(1);
     return audioRef.current;
   }
   async function resolvePack(id: string) {
@@ -594,40 +586,6 @@ export default function App() {
                     : paused
                       ? "Resume engine"
                       : "Start engine"}
-              </button>
-              <button
-                className="icon-button"
-                aria-label={muted ? "Unmute" : "Mute"}
-                aria-pressed={muted}
-                onClick={() => setMuted((v) => !v)}
-              >
-                {muted ? <VolumeX size={19} /> : <Volume2 size={19} />}
-              </button>
-            </div>
-            <div className="mode-switch" aria-label="Input mode">
-              <button
-                className={!demo ? "active" : ""}
-                aria-pressed={!demo}
-                disabled={running || busy}
-                onClick={() => {
-                  setDemo(false);
-                  setPaused(false);
-                  setTelemetry(idleTelemetry);
-                }}
-              >
-                Live drive
-              </button>
-              <button
-                className={demo ? "active" : ""}
-                aria-pressed={demo}
-                disabled={running || busy}
-                onClick={() => {
-                  setDemo(true);
-                  setPaused(false);
-                  setTelemetry(idleTelemetry);
-                }}
-              >
-                Demo mode
               </button>
             </div>
             {running && !demo && (

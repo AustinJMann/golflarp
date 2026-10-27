@@ -13,8 +13,7 @@ test("requests the iPhone playback session before unlocking audio", async ({
       return resume.call(this);
     };
   });
-  await page.goto("/");
-  await page.getByRole("button", { name: "Demo mode" }).click();
+  await page.goto("/demo");
   await page.getByRole("button", { name: "Start engine" }).click();
   await expect(page.getByRole("button", { name: "Stop engine" })).toBeVisible();
   await page.getByRole("button", { name: "Stop engine" }).click();
@@ -45,9 +44,10 @@ test("dashboard, demo audio, settings and install guidance", async ({
       return Reflect.apply(connect, this, [destination, ...args]);
     } as typeof AudioNode.prototype.connect;
   });
-  await page.goto("/");
+  await page.goto("/demo");
   await expect(page.getByLabel("Speedometer", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Demo mode" }).click();
+  const dock = page.getByRole("navigation", { name: "Main navigation" });
+  const dockPosition = await dock.boundingBox();
   await page.getByRole("button", { name: "Start engine" }).click();
   await expect(page.getByRole("button", { name: "Stop engine" })).toBeVisible();
   await expect(
@@ -83,11 +83,9 @@ test("dashboard, demo audio, settings and install guidance", async ({
   await expect(page.getByLabel("Master volume", { exact: true })).toHaveCount(
     0,
   );
-  await page.getByRole("button", { name: "Mute", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Unmute", exact: true }),
-  ).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Unmute", exact: true }).click();
+    page.getByRole("button", { name: /^(Mute|Unmute|Live drive|Demo mode)$/ }),
+  ).toHaveCount(0);
   await page.getByLabel("Demo throttle").fill("1");
   await page.waitForTimeout(500);
   expect(Math.abs((await rpm()) - beforeThrottle)).toBeLessThan(3);
@@ -95,6 +93,11 @@ test("dashboard, demo audio, settings and install guidance", async ({
   await page.screenshot({ path: "test-results/dashboard.png", fullPage: true });
   await page.getByRole("button", { name: "Stop engine" }).click();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
+  expect(await dock.boundingBox()).toEqual(dockPosition);
+  await page
+    .getByRole("button", { name: "Add to Home Screen", exact: true })
+    .scrollIntoViewIfNeeded();
+  expect(await dock.boundingBox()).toEqual(dockPosition);
   await expect(page.getByLabel("Vehicle top speed")).toHaveValue("25");
   await expect(page.getByLabel("0–25 mph time", { exact: true })).toHaveValue(
     "10",
@@ -163,7 +166,7 @@ test("sound editing persists blobs, exports and imports packs, and works offline
   await context.setOffline(true);
   await page.reload();
   await expect(page.getByLabel("Speedometer", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Demo mode" }).click();
+  await page.goto("/demo");
   await page.getByRole("button", { name: "Start engine" }).click();
   await expect(page.getByRole("button", { name: "Stop engine" })).toBeVisible();
   await page.getByRole("button", { name: "Stop engine" }).click();
@@ -218,6 +221,10 @@ test("live mode consumes GPS updates and releases tracking on stop", async ({
       } as GeolocationPosition);
   });
   await page.goto("/");
+  await expect(page.getByLabel("Demo target speed")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: /^(Mute|Unmute|Live drive|Demo mode)$/ }),
+  ).toHaveCount(0);
   await page.getByRole("button", { name: "Start engine" }).click();
   await expect(page.getByRole("button", { name: "Stop engine" })).toBeVisible();
   const rates = () =>
