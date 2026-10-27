@@ -24,7 +24,7 @@ Keep the same public origin for upgrades: custom packs belong to that browser’
 
 1. Open the HTTPS address in Safari once online; wait for the default assets to cache.
 2. Use **Share → Add to Home Screen** (Share may be inside More). Enable **Open as Web App** if shown, then Add. The in-app install guide explains the flow. iOS does not provide the same programmatic install prompt as Chromium.
-3. Pair your speaker using iOS audio settings, mount the phone securely, and tap **Start engine**. Allow location and motion when requested. Audio starts from this explicit tap.
+3. Pair your speaker using iOS audio settings, mount the phone securely, and tap **Start engine**. Allow location and motion when requested. Audio starts from this explicit tap. The app requests a playback audio session on supported iPhones so Silent Mode does not mute the engine. Device media volume and the selected speaker still control the output.
 4. Hold the cart still for roughly three seconds, then gently accelerate straight ahead. Calibration instructions disappear when the forward direction has been learned. GPS speed works during calibration. Use Recalibrate while stopped if you move the phone.
 5. Leave GolfLarp visible. Switching apps, locking the phone, or an audio interruption pauses the engine; tap Resume after returning. Screen wake lock is requested while running if enabled.
 

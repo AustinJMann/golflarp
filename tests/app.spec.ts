@@ -1,5 +1,27 @@
 import { expect, test } from "@playwright/test";
 
+test("requests the iPhone playback session before unlocking audio", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const session = { type: "auto" };
+    Object.defineProperty(navigator, "audioSession", { value: session });
+    const resume = AudioContext.prototype.resume;
+    AudioContext.prototype.resume = function () {
+      if (session.type !== "playback")
+        throw new Error("Audio resumed without the playback session");
+      return resume.call(this);
+    };
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Demo mode" }).click();
+  await page.getByRole("button", { name: "Start engine" }).click();
+  await expect(page.getByRole("button", { name: "Stop engine" })).toBeVisible();
+  await page.getByRole("button", { name: "Stop engine" }).click();
+  await page.getByRole("button", { name: "Start engine" }).click();
+  await expect(page.getByRole("button", { name: "Stop engine" })).toBeVisible();
+});
+
 test("dashboard, demo audio, settings and install guidance", async ({
   page,
 }) => {

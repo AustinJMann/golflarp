@@ -50,6 +50,24 @@ export class AudioEngine {
     this.master.connect(this.context.destination);
   }
   unlock() {
+    // iOS otherwise treats Web Audio as ambient audio, which obeys Silent Mode.
+    // Request the session during the tap, before resume or asynchronous loading.
+    const session = (
+      navigator as Navigator & { audioSession?: { type: string } }
+    ).audioSession;
+    if (session) {
+      try {
+        session.type = "playback";
+      } catch {
+        // Other browsers may expose a session without allowing this category.
+      }
+    }
+    // Activate the output during the gesture even while engine assets load.
+    const primer = this.context.createBufferSource();
+    primer.buffer = this.context.createBuffer(1, 1, this.context.sampleRate);
+    primer.connect(this.master);
+    primer.onended = () => primer.disconnect();
+    primer.start();
     return this.context.resume();
   }
   setVolume(volume: number) {
