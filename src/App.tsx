@@ -167,9 +167,6 @@ export default function App() {
   demoValues.current = { speed: demoSpeed, throttle: demoThrottle };
   const generation = useRef(0);
   const importInput = useRef<HTMLInputElement>(null);
-  const selected =
-    packs.find((p) => p.manifest.id === settings.packId)?.manifest ??
-    DEFAULT_PACK;
   const [needRefresh, setNeedRefresh] = useState(false);
   const { updateServiceWorker } = useRegisterSW({
     onNeedRefresh() {
@@ -597,14 +594,6 @@ export default function App() {
                     : paused
                       ? "Resume engine"
                       : "Start engine"}
-              </button>
-              <button
-                className="secondary"
-                aria-label="Choose engine"
-                disabled={busy}
-                onClick={() => changePage("garage")}
-              >
-                {selected.name}
               </button>
               <button
                 className="icon-button"
